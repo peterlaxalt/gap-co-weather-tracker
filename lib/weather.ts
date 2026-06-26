@@ -98,7 +98,10 @@ async function fetchCity(w: Waypoint): Promise<ForecastPoint[]> {
     `&hourly=${HOURLY_VARS}` +
     `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch` +
     `&timezone=${encodeURIComponent(TZ)}&forecast_days=14`;
-  const res = await fetch(url, { next: { revalidate: 1800 } }); // cache 30 min
+  const res = await fetch(url, {
+    next: { revalidate: 1800 }, // cache 30 min
+    signal: AbortSignal.timeout(8000), // never hang a build/request on a slow API
+  });
   if (!res.ok) {
     throw new Error(`Open-Meteo ${res.status} for ${w.name}`);
   }

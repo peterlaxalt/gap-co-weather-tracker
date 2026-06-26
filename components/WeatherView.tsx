@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { TripForecast, CityForecast, ForecastPoint } from "@/lib/weather";
 import { TRIP_DAYS } from "@/lib/trip";
-import { weatherEmoji, windArrow, popTint, tempColor, isWindy } from "@/lib/format";
+import { weatherCodeEmoji, windArrow, popTint, tempColor, isWindy } from "@/lib/format";
 
 type Props = {
   forecast: TripForecast;
@@ -69,7 +69,7 @@ export default function WeatherView({ forecast, hasTripDates }: Props) {
             <tr>
               <th className="corner">Town</th>
               {day.slots.map((s) => (
-                <th key={s.dt} className="hour">
+                <th key={s.time} className="hour">
                   {s.label}
                 </th>
               ))}
@@ -80,7 +80,7 @@ export default function WeatherView({ forecast, hasTripDates }: Props) {
               <CityRow
                 key={c.key}
                 city={c}
-                slotDts={day.slots.map((s) => s.dt)}
+                slotTimes={day.slots.map((s) => s.time)}
                 highlight={highlightKeys.has(c.key)}
               />
             ))}
@@ -120,14 +120,14 @@ function LegCaption({ day }: { day: TripForecast["days"][number] }) {
 
 function CityRow({
   city,
-  slotDts,
+  slotTimes,
   highlight,
 }: {
   city: CityForecast;
-  slotDts: number[];
+  slotTimes: string[];
   highlight: boolean;
 }) {
-  const pts = slotDts.map((dt) => city.points[dt]).filter(Boolean) as ForecastPoint[];
+  const pts = slotTimes.map((t) => city.points[t]).filter(Boolean) as ForecastPoint[];
   const summary = daySummary(pts);
   const roleText = city.roles
     .map((r) => `D${r.day} ${r.role === "start" ? "start" : "end"}`)
@@ -145,8 +145,8 @@ function CityRow({
         )}
         {roleText && <span className="city-roles">{roleText}</span>}
       </th>
-      {slotDts.map((dt) => (
-        <Cell key={dt} p={city.points[dt]} />
+      {slotTimes.map((t) => (
+        <Cell key={t} p={city.points[t]} />
       ))}
     </tr>
   );
@@ -167,7 +167,7 @@ function Cell({ p }: { p: ForecastPoint | undefined }) {
         {p.temp}°
       </div>
       <div className="emoji" aria-label={p.description}>
-        {weatherEmoji(p.weatherId)}
+        {weatherCodeEmoji(p.weatherCode)}
       </div>
       <div className={`pop ${pop >= 40 ? "pop-hi" : ""}`}>💧 {pop}%</div>
       <div className={`wind ${isWindy(p.windSpeed) ? "wind-hi" : ""}`}>

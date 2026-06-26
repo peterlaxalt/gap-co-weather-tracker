@@ -1,28 +1,40 @@
 import { WAYPOINTS, TRIP_DAYS, tripStartDate, type Waypoint } from "./trip";
 
-const TZ = "America/New_York"; // entire trail is in Eastern Time
-const FORECAST_URL = "https://api.openweathermap.org/data/2.5/forecast";
+// Open-Meteo: free, no API key, true hourly forecast. The trail is all Eastern
+// Time, so we ask the API to return timestamps already localized to ET.
+const TZ = "America/New_York";
+const FORECAST_URL = "https://api.open-meteo.com/v1/forecast";
+const HOURLY_VARS = [
+  "temperature_2m",
+  "apparent_temperature",
+  "relative_humidity_2m",
+  "precipitation_probability",
+  "precipitation",
+  "weather_code",
+  "wind_speed_10m",
+  "wind_direction_10m",
+  "wind_gusts_10m",
+].join(",");
 
 // ---- Shapes consumed by the UI -------------------------------------------
 
 export type ForecastPoint = {
-  dt: number; // unix seconds
+  time: string; // local ISO, e.g. "2026-06-26T14:00"
   temp: number;
   feelsLike: number;
   pop: number; // 0..1 probability of precipitation
-  rainMm: number; // expected rain over the 3h block, mm
+  precipIn: number; // inches over the hour
   windSpeed: number; // mph
   windDeg: number;
   windGust: number | null; // mph
   humidity: number; // %
-  weatherId: number;
-  main: string;
+  weatherCode: number; // WMO code
   description: string;
 };
 
 export type TimeSlot = {
-  dt: number;
-  label: string; // e.g. "9 AM"
+  time: string;
+  label: string; // e.g. "2 PM"
 };
 
 export type ForecastDay = {
@@ -40,7 +52,7 @@ export type CityForecast = {
   name: string;
   region: string;
   roles: CityRole[]; // which trip days this waypoint participates in
-  points: Record<number, ForecastPoint>; // keyed by dt
+  points: Record<string, ForecastPoint>; // keyed by time
 };
 
 export type TripForecast = {
@@ -50,31 +62,57 @@ export type TripForecast = {
   error: string | null;
 };
 
-// ---- ET date/time helpers -------------------------------------------------
+// ---- WMO weather code -> short description --------------------------------
 
-const dateKeyFmt = new Intl.DateTimeFormat("en-CA", {
-  timeZone: TZ,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
+function describeCode(code: number): string {
+  const map: Record<number, string> = {
+    0: "clear sky",
+    1: "mainly clear",
+    2: "partly cloudy",
+    3: "overcast",
+    45: "fog",
+    48: "rime fog",
+    51: "light drizzle",
+    53: "drizzle",
+    55: "dense drizzle",
+    56: "freezing drizzle",
+    57: "freezing drizzle",
+    61: "light rain",
+    63: "rain",
+    65: "heavy rain",
+    66: "freezing rain",
+    67: "freezing rain",
+    71: "light snow",
+    73: "snow",
+    75: "heavy snow",
+    77: "snow grains",
+    80: "light showers",
+    81: "showers",
+    82: "violent showers",
+    85: "snow showers",
+    86: "snow showers",
+    95: "thunderstorm",
+    96: "thunderstorm w/ hail",
+    99: "thunderstorm w/ hail",
+  };
+  return map[code] ?? "—";
+}
 
-const hourFmt = new Intl.DateTimeFormat("en-US", {
-  timeZone: TZ,
-  hour: "numeric",
-  hour12: true,
-});
+// ---- date/time helpers (timestamps already in ET) ------------------------
 
-const weekdayFmt = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" });
+const weekdayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" });
 const prettyFmt = new Intl.DateTimeFormat("en-US", {
-  timeZone: TZ,
+  timeZone: "UTC",
   weekday: "short",
   month: "short",
   day: "numeric",
 });
 
-function dateKeyOf(dt: number): string {
-  return dateKeyFmt.format(new Date(dt * 1000));
+function hourLabel(time: string): string {
+  const h = Number(time.slice(11, 13));
+  const ampm = h < 12 ? "AM" : "PM";
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return `${hr} ${ampm}`;
 }
 
 // ---- Roles: which days each waypoint appears on ---------------------------
@@ -88,86 +126,57 @@ function rolesByCity(): Map<string, CityRole[]> {
   return map;
 }
 
-// ---- OpenWeather fetch ----------------------------------------------------
+// ---- Open-Meteo fetch -----------------------------------------------------
 
-type OWForecastResponse = {
-  list: Array<{
-    dt: number;
-    main: { temp: number; feels_like: number; humidity: number };
-    weather: Array<{ id: number; main: string; description: string }>;
-    wind: { speed: number; deg: number; gust?: number };
-    pop?: number;
-    rain?: { "3h"?: number };
-  }>;
+type OMResponse = {
+  hourly: {
+    time: string[];
+    temperature_2m: number[];
+    apparent_temperature: number[];
+    relative_humidity_2m: number[];
+    precipitation_probability: (number | null)[];
+    precipitation: number[];
+    weather_code: number[];
+    wind_speed_10m: number[];
+    wind_direction_10m: number[];
+    wind_gusts_10m: number[];
+  };
 };
 
-async function fetchCity(w: Waypoint, apiKey: string): Promise<ForecastPoint[]> {
-  const url = `${FORECAST_URL}?lat=${w.lat}&lon=${w.lon}&units=imperial&appid=${apiKey}`;
+async function fetchCity(w: Waypoint): Promise<ForecastPoint[]> {
+  const url =
+    `${FORECAST_URL}?latitude=${w.lat}&longitude=${w.lon}` +
+    `&hourly=${HOURLY_VARS}` +
+    `&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch` +
+    `&timezone=${encodeURIComponent(TZ)}&forecast_days=14`;
   const res = await fetch(url, { next: { revalidate: 1800 } }); // cache 30 min
   if (!res.ok) {
-    const err = new Error(`OpenWeather ${res.status} for ${w.name}`);
-    (err as Error & { status?: number }).status = res.status;
-    throw err;
+    throw new Error(`Open-Meteo ${res.status} for ${w.name}`);
   }
-  const data = (await res.json()) as OWForecastResponse;
-  return data.list.map((e) => ({
-    dt: e.dt,
-    temp: Math.round(e.main.temp),
-    feelsLike: Math.round(e.main.feels_like),
-    pop: e.pop ?? 0,
-    rainMm: e.rain?.["3h"] ?? 0,
-    windSpeed: Math.round(e.wind.speed),
-    windDeg: e.wind.deg,
-    windGust: e.wind.gust != null ? Math.round(e.wind.gust) : null,
-    humidity: e.main.humidity,
-    weatherId: e.weather[0]?.id ?? 800,
-    main: e.weather[0]?.main ?? "Clear",
-    description: e.weather[0]?.description ?? "",
-  }));
-}
-
-// ---- Demo data (OPENWEATHER_API_KEY=demo) ---------------------------------
-
-const MOCK_IDS = [800, 801, 802, 803, 804, 500, 501, 520, 200, 741];
-
-function mockCity(cityIdx: number): ForecastPoint[] {
-  // 40 points (5 days x 8), every 3h, starting at the next 3h boundary.
-  const now = Math.floor(Date.now() / 1000);
-  const step = 3 * 3600;
-  const start = Math.ceil(now / step) * step;
-  const out: ForecastPoint[] = [];
-  for (let i = 0; i < 40; i++) {
-    const dt = start + i * step;
-    const hourOfDay = (Math.floor(dt / 3600) % 24 + 24) % 24;
-    const diurnal = Math.sin(((hourOfDay - 9) / 24) * 2 * Math.PI); // peak ~3pm
-    const temp = Math.round(68 + 14 * diurnal + cityIdx * 1.5 - i * 0.05);
-    const wid = MOCK_IDS[(cityIdx * 3 + i) % MOCK_IDS.length];
-    const rainy = wid >= 200 && wid < 600;
-    const pop = rainy ? Math.min(0.95, 0.3 + ((cityIdx + i) % 5) * 0.15) : ((i + cityIdx) % 4) * 0.05;
-    out.push({
-      dt,
-      temp,
-      feelsLike: temp + (temp > 80 ? 3 : -1),
-      pop,
-      rainMm: rainy ? 1.2 : 0,
-      windSpeed: 5 + ((cityIdx * 2 + i) % 16),
-      windDeg: (cityIdx * 40 + i * 25) % 360,
-      windGust: 10 + ((cityIdx + i) % 14),
-      humidity: 45 + ((cityIdx * 5 + i * 3) % 50),
-      weatherId: wid,
-      main: rainy ? "Rain" : "Clouds",
-      description: rainy ? "light rain" : "scattered clouds",
-    });
-  }
-  return out;
+  const { hourly } = (await res.json()) as OMResponse;
+  return hourly.time.map((time, i) => {
+    const code = hourly.weather_code[i] ?? 0;
+    const gust = hourly.wind_gusts_10m[i];
+    return {
+      time,
+      temp: Math.round(hourly.temperature_2m[i]),
+      feelsLike: Math.round(hourly.apparent_temperature[i]),
+      pop: (hourly.precipitation_probability[i] ?? 0) / 100,
+      precipIn: hourly.precipitation[i] ?? 0,
+      windSpeed: Math.round(hourly.wind_speed_10m[i]),
+      windDeg: hourly.wind_direction_10m[i],
+      windGust: gust != null ? Math.round(gust) : null,
+      humidity: Math.round(hourly.relative_humidity_2m[i]),
+      weatherCode: code,
+      description: describeCode(code),
+    };
+  });
 }
 
 // ---- Build the full trip forecast ----------------------------------------
 
 export async function getTripForecast(): Promise<TripForecast> {
-  const apiKey = process.env.OPENWEATHER_API_KEY?.trim();
   const roles = rolesByCity();
-
   const baseCities: CityForecast[] = WAYPOINTS.map((w) => ({
     key: w.key,
     name: w.name,
@@ -176,42 +185,30 @@ export async function getTripForecast(): Promise<TripForecast> {
     points: {},
   }));
 
-  if (!apiKey) {
-    return {
-      generatedAt: Math.floor(Date.now() / 1000),
-      days: [],
-      cities: baseCities,
-      error: "missing-key",
-    };
-  }
-
   try {
-    const results =
-      apiKey === "demo"
-        ? WAYPOINTS.map((w, i) => mockCity(i))
-        : await Promise.all(WAYPOINTS.map((w) => fetchCity(w, apiKey)));
+    const results = await Promise.all(WAYPOINTS.map((w) => fetchCity(w)));
 
     const cities: CityForecast[] = baseCities.map((c, i) => {
-      const points: Record<number, ForecastPoint> = {};
-      for (const p of results[i]) points[p.dt] = p;
+      const points: Record<string, ForecastPoint> = {};
+      for (const p of results[i]) points[p.time] = p;
       return { ...c, points };
     });
 
-    // Collect all distinct timestamps, group into days.
-    const allDts = new Set<number>();
-    for (const r of results) for (const p of r) allDts.add(p.dt);
-    const sortedDts = [...allDts].sort((a, b) => a - b);
+    // Distinct timestamps grouped into days (all cities share the ET hourly grid).
+    const allTimes = new Set<string>();
+    for (const r of results) for (const p of r) allTimes.add(p.time);
+    const sortedTimes = [...allTimes].sort();
 
     const start = tripStartDate();
     const dayMap = new Map<string, TimeSlot[]>();
-    for (const dt of sortedDts) {
-      const key = dateKeyOf(dt);
-      const slot: TimeSlot = { dt, label: hourFmt.format(new Date(dt * 1000)).replace(/\s/g, " ") };
+    for (const time of sortedTimes) {
+      const key = time.slice(0, 10);
+      const slot: TimeSlot = { time, label: hourLabel(time) };
       (dayMap.get(key) ?? dayMap.set(key, []).get(key)!).push(slot);
     }
 
     const days: ForecastDay[] = [...dayMap.entries()].map(([dateKey, slots]) => {
-      const sample = new Date((slots[0].dt) * 1000);
+      const sample = new Date(`${dateKey}T12:00:00Z`);
       let tripBadge: string | null = null;
       if (start) {
         const diff = Math.round(
@@ -228,19 +225,13 @@ export async function getTripForecast(): Promise<TripForecast> {
       };
     });
 
-    return {
-      generatedAt: Math.floor(Date.now() / 1000),
-      days,
-      cities,
-      error: null,
-    };
+    return { generatedAt: Math.floor(Date.now() / 1000), days, cities, error: null };
   } catch (err) {
-    const status = (err as { status?: number })?.status;
     return {
       generatedAt: Math.floor(Date.now() / 1000),
       days: [],
       cities: baseCities,
-      error: status === 401 ? "invalid-key" : err instanceof Error ? err.message : "fetch-failed",
+      error: err instanceof Error ? err.message : "fetch-failed",
     };
   }
 }

@@ -1,17 +1,18 @@
 // Pure presentation helpers (safe to import in client components).
 
-// Map an OpenWeather "weather id" to an emoji glyph.
-export function weatherEmoji(id: number): string {
-  if (id >= 200 && id < 300) return "⛈️"; // thunderstorm
-  if (id >= 300 && id < 400) return "🌦️"; // drizzle
-  if (id === 511) return "🌧️"; // freezing rain
-  if (id >= 500 && id < 600) return "🌧️"; // rain
-  if (id >= 600 && id < 700) return "🌨️"; // snow
-  if (id >= 700 && id < 800) return "🌫️"; // mist/fog/haze
-  if (id === 800) return "☀️"; // clear
-  if (id === 801) return "🌤️"; // few clouds
-  if (id === 802) return "⛅"; // scattered
-  if (id >= 803) return "☁️"; // broken/overcast
+// Map a WMO weather code (Open-Meteo) to an emoji glyph.
+export function weatherCodeEmoji(code: number): string {
+  if (code === 0) return "☀️"; // clear
+  if (code === 1) return "🌤️"; // mainly clear
+  if (code === 2) return "⛅"; // partly cloudy
+  if (code === 3) return "☁️"; // overcast
+  if (code === 45 || code === 48) return "🌫️"; // fog
+  if (code >= 51 && code <= 57) return "🌦️"; // drizzle
+  if (code >= 61 && code <= 67) return "🌧️"; // rain
+  if (code >= 71 && code <= 77) return "🌨️"; // snow
+  if (code >= 80 && code <= 82) return "🌧️"; // rain showers
+  if (code === 85 || code === 86) return "🌨️"; // snow showers
+  if (code >= 95) return "⛈️"; // thunderstorm
   return "🌡️";
 }
 

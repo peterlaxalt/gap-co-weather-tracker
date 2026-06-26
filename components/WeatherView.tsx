@@ -1,222 +1,197 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { TripForecast, CityForecast, ForecastPoint } from "@/lib/weather";
-import { TRIP_DAYS } from "@/lib/trip";
-import { weatherCodeEmoji, windArrow, popTint, tempColor, isWindy } from "@/lib/format";
+import { useEffect, useRef } from "react";
+import {
+  Sun,
+  CloudSun,
+  Cloud,
+  CloudFog,
+  CloudRain,
+  CloudSnow,
+  CloudLightning,
+  Drop,
+  Umbrella,
+  NavigationArrow,
+  Path,
+  Mountains,
+} from "@phosphor-icons/react/dist/ssr";
+import type { TripForecast, TripDayForecast, TownDay, ForecastPoint } from "@/lib/weather";
+import {
+  tempColorScale,
+  popTint,
+  isWindy,
+  windCompass,
+  conditionIcon,
+  type IconKey,
+} from "@/lib/format";
 
-type Props = {
-  forecast: TripForecast;
-  hasTripDates: boolean;
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const HOUR_W = 50; // keep in sync with .cell / .hour width in globals.css
+const FIRST_W = 86; // keep in sync with .town / .corner width
+const SCROLL_TO_HOUR = 6;
+
+function hourLabel(h: number): string {
+  const ampm = h < 12 ? "a" : "p";
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return `${hr}${ampm}`;
+}
+
+const ICONS: Record<IconKey, typeof Sun> = {
+  sun: Sun,
+  cloudSun: CloudSun,
+  cloud: Cloud,
+  fog: CloudFog,
+  rain: CloudRain,
+  snow: CloudSnow,
+  storm: CloudLightning,
 };
 
-export default function WeatherView({ forecast, hasTripDates }: Props) {
-  const { days, cities } = forecast;
+export default function WeatherView({ forecast }: { forecast: TripForecast }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Default to the first trip-badged day if dates are set, else the first day.
-  const defaultIdx = useMemo(() => {
-    const i = days.findIndex((d) => d.tripBadge === "Day 1");
-    return i >= 0 ? i : 0;
-  }, [days]);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollLeft = SCROLL_TO_HOUR * HOUR_W;
+  }, []);
 
-  const [activeIdx, setActiveIdx] = useState(defaultIdx);
-  const day = days[activeIdx];
-
-  // Which city rows to highlight for the selected day's trip leg.
-  const highlightKeys = useMemo(() => {
-    if (!day?.tripBadge) return new Set<string>();
-    const n = Number(day.tripBadge.replace(/\D/g, ""));
-    const td = TRIP_DAYS.find((t) => t.day === n);
-    return new Set(td ? [td.startKey, td.endKey] : []);
-  }, [day]);
-
-  if (!day) {
+  if (forecast.error || forecast.tripDays.length === 0) {
     return (
-      <main className="wrap">
-        <Header forecast={forecast} />
-        <p className="empty">
-          {forecast.error
-            ? `Couldn't load the forecast (${forecast.error}). Check your API key and try again.`
-            : "No forecast data available yet."}
-        </p>
+      <main className="empty">
+        Couldn’t load the forecast{forecast.error ? ` (${forecast.error})` : ""}. Try again shortly.
       </main>
     );
   }
 
   return (
-    <main className="wrap">
-      <Header forecast={forecast} />
-
-      <nav className="tabs" aria-label="Forecast days">
-        {days.map((d, i) => (
-          <button
-            key={d.dateKey}
-            className={`tab ${i === activeIdx ? "active" : ""}`}
-            onClick={() => setActiveIdx(i)}
-          >
-            {d.tripBadge && <span className="tab-badge">{d.tripBadge}</span>}
-            <span className="tab-day">{d.weekday}</span>
-            <span className="tab-date">{d.pretty.replace(/^\w+,\s/, "")}</span>
-          </button>
-        ))}
-      </nav>
-
-      <LegCaption day={day} />
-
-      <div className="grid-scroll">
-        <table className="grid">
-          <thead>
-            <tr>
-              <th className="corner">Town</th>
-              {day.slots.map((s) => (
-                <th key={s.time} className="hour">
-                  {s.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {cities.map((c) => (
-              <CityRow
-                key={c.key}
-                city={c}
-                slotTimes={day.slots.map((s) => s.time)}
-                highlight={highlightKeys.has(c.key)}
-              />
+    <div className="grid-scroll" ref={scrollRef}>
+      <table className="grid" style={{ ["--hour-w" as string]: `${HOUR_W}px`, ["--first-w" as string]: `${FIRST_W}px` }}>
+        <thead>
+          <tr>
+            <th className="corner" />
+            {HOURS.map((h) => (
+              <th key={h} className={`hour ${h % 6 === 0 ? "hour-mark" : ""}`}>
+                {hourLabel(h)}
+              </th>
             ))}
-          </tbody>
-        </table>
-      </div>
-
-      <Legend />
-    </main>
+          </tr>
+        </thead>
+        <tbody>
+          {forecast.tripDays.map((d) => (
+            <DayGroup key={d.day} d={d} />
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
-function Header({ forecast }: { forecast: TripForecast }) {
-  const updated = relativeTime(forecast.generatedAt);
+function DayGroup({ d }: { d: TripDayForecast }) {
   return (
-    <header className="hero">
-      <h1>
-        <span className="bike">🚲</span> GAP &amp; C&amp;O Weather
-      </h1>
-      <p className="sub">Pittsburgh → DC · hour-by-hour along the trail</p>
-      <p className="updated">Updated {updated} · auto-refreshes every 30 min</p>
-    </header>
+    <>
+      <tr className="banner">
+        <td className="banner-cell" colSpan={HOURS.length + 1}>
+          <div className="banner-inner">
+            <span className="b-day">Day {d.day}</span>
+            <span className="b-date">
+              {d.weekday} {d.pretty}
+            </span>
+            <span className="b-route">{d.routeLabel}</span>
+            <span className="b-stats">
+              <Path size={11} weight="bold" /> {d.miles} mi
+              <Mountains size={11} weight="bold" /> {d.elevationFt.toLocaleString()} ft
+            </span>
+            <DaySummaryChip d={d} />
+          </div>
+        </td>
+      </tr>
+      {d.available ? (
+        <>
+          <TownRow town={d.start} role="start" />
+          <TownRow town={d.end} role="end" />
+        </>
+      ) : (
+        <tr className="town-row">
+          <th className="town" data-role="">
+            <span className="t-name">{d.start.name}</span>
+          </th>
+          <td className="unavail" colSpan={HOURS.length}>
+            <div className="unavail-inner">Forecast available closer to the date</div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-function LegCaption({ day }: { day: TripForecast["days"][number] }) {
-  if (!day.tripBadge) return null;
-  const n = Number(day.tripBadge.replace(/\D/g, ""));
-  const td = TRIP_DAYS.find((t) => t.day === n);
-  if (!td) return null;
+function DaySummaryChip({ d }: { d: TripDayForecast }) {
+  if (!d.summary) return null;
+  const { key, color } = conditionIcon(d.summary.code);
+  const Icon = ICONS[key];
   return (
-    <p className="leg">
-      <strong>{day.tripBadge}:</strong> {td.label} · {td.miles} mi · {td.elevationFt.toLocaleString()} ft
-    </p>
+    <span className="b-wx">
+      <Icon size={15} weight="fill" color={color} />
+      <strong>
+        {d.summary.lo}–{d.summary.hi}°
+      </strong>
+      {d.summary.maxPop >= 10 && (
+        <span className="b-rain">
+          <Umbrella size={12} weight="fill" /> {d.summary.maxPop}%
+        </span>
+      )}
+    </span>
   );
 }
 
-function CityRow({
-  city,
-  slotTimes,
-  highlight,
-}: {
-  city: CityForecast;
-  slotTimes: string[];
-  highlight: boolean;
-}) {
-  const pts = slotTimes.map((t) => city.points[t]).filter(Boolean) as ForecastPoint[];
-  const summary = daySummary(pts);
-  const roleText = city.roles
-    .map((r) => `D${r.day} ${r.role === "start" ? "start" : "end"}`)
-    .join(" · ");
-
+function TownRow({ town, role }: { town: TownDay; role: "start" | "end" }) {
   return (
-    <tr className={highlight ? "row-hi" : ""}>
-      <th className="city">
-        <span className="city-name">{city.name}</span>
-        <span className="city-region">{city.region}</span>
-        {summary && (
-          <span className="city-summary">
-            {summary.lo}°–{summary.hi}° · 💧{summary.maxPop}%
-          </span>
-        )}
-        {roleText && <span className="city-roles">{roleText}</span>}
+    <tr className="town-row">
+      <th className="town" data-role={role}>
+        <span className="t-name">{town.name}</span>
+        <span className="t-tag">{role}</span>
       </th>
-      {slotTimes.map((t) => (
-        <Cell key={t} p={city.points[t]} />
+      {HOURS.map((h) => (
+        <Cell key={h} p={town.byHour[h]} mark={h % 6 === 0} />
       ))}
     </tr>
   );
 }
 
-function Cell({ p }: { p: ForecastPoint | undefined }) {
+function Cell({ p, mark }: { p: ForecastPoint | undefined; mark: boolean }) {
   if (!p) {
     return (
-      <td className="cell empty-cell">
-        <span className="dash">—</span>
+      <td className={`cell ${mark ? "mark" : ""}`}>
+        <span className="dash">·</span>
       </td>
     );
   }
+  const { key, color } = conditionIcon(p.weatherCode);
+  const Icon = ICONS[key];
+  const { bg, fg } = tempColorScale(p.temp);
   const pop = Math.round(p.pop * 100);
+  const windy = isWindy(p.windSpeed);
+  const title =
+    `${p.temp}°F (feels ${p.feelsLike}°) · ${pop}% rain · ` +
+    `wind ${p.windSpeed} mph from ${windCompass(p.windDeg)}${p.windGust ? ` (gust ${p.windGust})` : ""} · ` +
+    `${p.humidity}% humidity`;
   return (
-    <td className="cell" style={{ background: popTint(p.pop) }} title={p.description}>
-      <div className="temp" style={{ color: tempColor(p.temp) }}>
+    <td className={`cell ${mark ? "mark" : ""}`} style={{ background: popTint(p.pop) }} title={title}>
+      <Icon className="c-icon" size={15} weight="fill" color={color} />
+      <span className="temp" style={{ background: bg, color: fg }}>
         {p.temp}°
-      </div>
-      <div className="emoji" aria-label={p.description}>
-        {weatherCodeEmoji(p.weatherCode)}
-      </div>
-      <div className={`pop ${pop >= 40 ? "pop-hi" : ""}`}>💧 {pop}%</div>
-      <div className={`wind ${isWindy(p.windSpeed) ? "wind-hi" : ""}`}>
-        <span className="arrow">{windArrow(p.windDeg)}</span> {p.windSpeed}
-        <span className="unit"> mph</span>
-      </div>
-      <div className="hum">💦 {p.humidity}%</div>
+      </span>
+      <span className={`rain ${pop >= 40 ? "rain-hi" : ""}`}>
+        <Umbrella size={9} weight="fill" /> {pop}
+      </span>
+      <span className={`wind ${windy ? "wind-hi" : ""}`}>
+        <NavigationArrow
+          size={9}
+          weight="fill"
+          style={{ transform: `rotate(${p.windDeg + 135}deg)` }}
+        />{" "}
+        {p.windSpeed}
+      </span>
+      <span className="hum">
+        <Drop size={9} weight="fill" /> {p.humidity}
+      </span>
     </td>
   );
-}
-
-function Legend() {
-  return (
-    <footer className="legend">
-      <div>
-        <span className="temp-chip">68°</span> temp (°F)
-      </div>
-      <div>💧 chance of rain</div>
-      <div>
-        <span className="arrow">→</span> wind dir + mph
-      </div>
-      <div>💦 humidity</div>
-      <div className="legend-note">
-        Blue cells = higher rain chance. Bold wind = 15+ mph (notable headwind).
-      </div>
-    </footer>
-  );
-}
-
-// ---- helpers --------------------------------------------------------------
-
-function daySummary(pts: ForecastPoint[]): { hi: number; lo: number; maxPop: number } | null {
-  if (pts.length === 0) return null;
-  let hi = -Infinity;
-  let lo = Infinity;
-  let maxPop = 0;
-  for (const p of pts) {
-    hi = Math.max(hi, p.temp);
-    lo = Math.min(lo, p.temp);
-    maxPop = Math.max(maxPop, p.pop);
-  }
-  return { hi, lo, maxPop: Math.round(maxPop * 100) };
-}
-
-function relativeTime(unixSeconds: number): string {
-  const diffMs = Date.now() - unixSeconds * 1000;
-  const mins = Math.max(0, Math.round(diffMs / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.round(mins / 60);
-  return `${hrs} hr${hrs === 1 ? "" : "s"} ago`;
 }

@@ -1,4 +1,4 @@
-import { WAYPOINTS, TRIP_DAYS, tripStartDate, type Waypoint } from "./trip";
+import { WAYPOINTS, TRIP_DAYS, tripStartDate, waypointByKey, type Waypoint } from "./trip";
 
 // Open-Meteo: free, no API key, true hourly forecast. The trail is all Eastern
 // Time, so we ask the API to return timestamps already localized to ET.
@@ -16,10 +16,15 @@ const HOURLY_VARS = [
   "wind_gusts_10m",
 ].join(",");
 
+// Riding window used for the per-day summary.
+const RIDE_START_HOUR = 7;
+const RIDE_END_HOUR = 19;
+
 // ---- Shapes consumed by the UI -------------------------------------------
 
 export type ForecastPoint = {
   time: string; // local ISO, e.g. "2026-06-26T14:00"
+  hour: number; // 0..23
   temp: number;
   feelsLike: number;
   pop: number; // 0..1 probability of precipitation
@@ -29,101 +34,45 @@ export type ForecastPoint = {
   windGust: number | null; // mph
   humidity: number; // %
   weatherCode: number; // WMO code
-  description: string;
 };
 
-export type TimeSlot = {
-  time: string;
-  label: string; // e.g. "2 PM"
-};
-
-export type ForecastDay = {
-  dateKey: string; // YYYY-MM-DD in ET
-  weekday: string; // "Sat"
-  pretty: string; // "Sat, Jun 28"
-  tripBadge: string | null; // "Day 1" if mapped via TRIP_START_DATE
-  slots: TimeSlot[];
-};
-
-export type CityRole = { day: number; role: "start" | "end" };
-
-export type CityForecast = {
+export type TownDay = {
   key: string;
   name: string;
   region: string;
-  roles: CityRole[]; // which trip days this waypoint participates in
-  points: Record<string, ForecastPoint>; // keyed by time
+  byHour: Record<number, ForecastPoint>; // hour-of-day -> point (this day's date)
+};
+
+export type DaySummary = { hi: number; lo: number; maxPop: number; code: number } | null;
+
+export type TripDayForecast = {
+  day: number;
+  date: string; // YYYY-MM-DD
+  weekday: string; // "Fri"
+  pretty: string; // "Jun 26"
+  routeLabel: string; // "Pittsburgh → Smithton"
+  miles: number;
+  elevationFt: number;
+  start: TownDay;
+  end: TownDay;
+  summary: DaySummary;
+  available: boolean;
 };
 
 export type TripForecast = {
   generatedAt: number;
-  days: ForecastDay[];
-  cities: CityForecast[];
+  tripDays: TripDayForecast[];
   error: string | null;
 };
 
-// ---- WMO weather code -> short description --------------------------------
-
-function describeCode(code: number): string {
-  const map: Record<number, string> = {
-    0: "clear sky",
-    1: "mainly clear",
-    2: "partly cloudy",
-    3: "overcast",
-    45: "fog",
-    48: "rime fog",
-    51: "light drizzle",
-    53: "drizzle",
-    55: "dense drizzle",
-    56: "freezing drizzle",
-    57: "freezing drizzle",
-    61: "light rain",
-    63: "rain",
-    65: "heavy rain",
-    66: "freezing rain",
-    67: "freezing rain",
-    71: "light snow",
-    73: "snow",
-    75: "heavy snow",
-    77: "snow grains",
-    80: "light showers",
-    81: "showers",
-    82: "violent showers",
-    85: "snow showers",
-    86: "snow showers",
-    95: "thunderstorm",
-    96: "thunderstorm w/ hail",
-    99: "thunderstorm w/ hail",
-  };
-  return map[code] ?? "—";
-}
-
-// ---- date/time helpers (timestamps already in ET) ------------------------
+// ---- date helpers ---------------------------------------------------------
 
 const weekdayFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "short" });
-const prettyFmt = new Intl.DateTimeFormat("en-US", {
-  timeZone: "UTC",
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-});
+const prettyFmt = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
 
-function hourLabel(time: string): string {
-  const h = Number(time.slice(11, 13));
-  const ampm = h < 12 ? "AM" : "PM";
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return `${hr} ${ampm}`;
-}
-
-// ---- Roles: which days each waypoint appears on ---------------------------
-
-function rolesByCity(): Map<string, CityRole[]> {
-  const map = new Map<string, CityRole[]>();
-  for (const d of TRIP_DAYS) {
-    (map.get(d.startKey) ?? map.set(d.startKey, []).get(d.startKey)!).push({ day: d.day, role: "start" });
-    (map.get(d.endKey) ?? map.set(d.endKey, []).get(d.endKey)!).push({ day: d.day, role: "end" });
-  }
-  return map;
+function addDays(isoDate: string, n: number): string {
+  const ms = Date.parse(`${isoDate}T00:00:00Z`) + n * 86_400_000;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 // ---- Open-Meteo fetch -----------------------------------------------------
@@ -155,10 +104,10 @@ async function fetchCity(w: Waypoint): Promise<ForecastPoint[]> {
   }
   const { hourly } = (await res.json()) as OMResponse;
   return hourly.time.map((time, i) => {
-    const code = hourly.weather_code[i] ?? 0;
     const gust = hourly.wind_gusts_10m[i];
     return {
       time,
+      hour: Number(time.slice(11, 13)),
       temp: Math.round(hourly.temperature_2m[i]),
       feelsLike: Math.round(hourly.apparent_temperature[i]),
       pop: (hourly.precipitation_probability[i] ?? 0) / 100,
@@ -167,70 +116,82 @@ async function fetchCity(w: Waypoint): Promise<ForecastPoint[]> {
       windDeg: hourly.wind_direction_10m[i],
       windGust: gust != null ? Math.round(gust) : null,
       humidity: Math.round(hourly.relative_humidity_2m[i]),
-      weatherCode: code,
-      description: describeCode(code),
+      weatherCode: hourly.weather_code[i] ?? 0,
     };
   });
+}
+
+// ---- build a town-day from a town's full hourly series --------------------
+
+function townDayFor(key: string, points: ForecastPoint[], date: string): TownDay {
+  const w = waypointByKey(key)!;
+  const byHour: Record<number, ForecastPoint> = {};
+  for (const p of points) {
+    if (p.time.slice(0, 10) === date) byHour[p.hour] = p;
+  }
+  return { key, name: w.name, region: w.region, byHour };
+}
+
+function summarize(start: TownDay, end: TownDay): DaySummary {
+  let hi = -Infinity;
+  let lo = Infinity;
+  let maxPop = 0;
+  let code = 0;
+  let seen = false;
+  for (const town of [start, end]) {
+    for (let h = RIDE_START_HOUR; h <= RIDE_END_HOUR; h++) {
+      const p = town.byHour[h];
+      if (!p) continue;
+      seen = true;
+      hi = Math.max(hi, p.temp);
+      lo = Math.min(lo, p.temp);
+      maxPop = Math.max(maxPop, p.pop);
+      code = Math.max(code, p.weatherCode); // higher WMO code ≈ more severe
+    }
+  }
+  return seen ? { hi, lo, maxPop: Math.round(maxPop * 100), code } : null;
 }
 
 // ---- Build the full trip forecast ----------------------------------------
 
 export async function getTripForecast(): Promise<TripForecast> {
-  const roles = rolesByCity();
-  const baseCities: CityForecast[] = WAYPOINTS.map((w) => ({
-    key: w.key,
-    name: w.name,
-    region: w.region,
-    roles: roles.get(w.key) ?? [],
-    points: {},
-  }));
-
+  const generatedAt = Math.floor(Date.now() / 1000);
   try {
     const results = await Promise.all(WAYPOINTS.map((w) => fetchCity(w)));
+    const series = new Map<string, ForecastPoint[]>();
+    WAYPOINTS.forEach((w, i) => series.set(w.key, results[i]));
 
-    const cities: CityForecast[] = baseCities.map((c, i) => {
-      const points: Record<string, ForecastPoint> = {};
-      for (const p of results[i]) points[p.time] = p;
-      return { ...c, points };
-    });
+    // Earliest forecast date available (fallback start when no trip date set).
+    let earliest = "9999-12-31";
+    for (const r of results) if (r.length && r[0].time < `${earliest}T`) earliest = r[0].time.slice(0, 10);
+    const startDate = tripStartDate() ?? earliest;
 
-    // Distinct timestamps grouped into days (all cities share the ET hourly grid).
-    const allTimes = new Set<string>();
-    for (const r of results) for (const p of r) allTimes.add(p.time);
-    const sortedTimes = [...allTimes].sort();
-
-    const start = tripStartDate();
-    const dayMap = new Map<string, TimeSlot[]>();
-    for (const time of sortedTimes) {
-      const key = time.slice(0, 10);
-      const slot: TimeSlot = { time, label: hourLabel(time) };
-      (dayMap.get(key) ?? dayMap.set(key, []).get(key)!).push(slot);
-    }
-
-    const days: ForecastDay[] = [...dayMap.entries()].map(([dateKey, slots]) => {
-      const sample = new Date(`${dateKey}T12:00:00Z`);
-      let tripBadge: string | null = null;
-      if (start) {
-        const diff = Math.round(
-          (Date.parse(`${dateKey}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / 86_400_000,
-        );
-        if (diff >= 0 && diff < TRIP_DAYS.length) tripBadge = `Day ${diff + 1}`;
-      }
+    const tripDays: TripDayForecast[] = TRIP_DAYS.map((d) => {
+      const date = addDays(startDate, d.day - 1);
+      const start = townDayFor(d.startKey, series.get(d.startKey)!, date);
+      const end = townDayFor(d.endKey, series.get(d.endKey)!, date);
+      const sample = new Date(`${date}T12:00:00Z`);
+      const available = Object.keys(start.byHour).length > 0;
       return {
-        dateKey,
+        day: d.day,
+        date,
         weekday: weekdayFmt.format(sample),
         pretty: prettyFmt.format(sample),
-        tripBadge,
-        slots,
+        routeLabel: `${start.name} → ${end.name}`,
+        miles: d.miles,
+        elevationFt: d.elevationFt,
+        start,
+        end,
+        summary: summarize(start, end),
+        available,
       };
     });
 
-    return { generatedAt: Math.floor(Date.now() / 1000), days, cities, error: null };
+    return { generatedAt, tripDays, error: null };
   } catch (err) {
     return {
-      generatedAt: Math.floor(Date.now() / 1000),
-      days: [],
-      cities: baseCities,
+      generatedAt,
+      tripDays: [],
       error: err instanceof Error ? err.message : "fetch-failed",
     };
   }

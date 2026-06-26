@@ -41,15 +41,19 @@ export type IconKey =
   | "snow"
   | "storm";
 
-export function conditionIcon(code: number): { key: IconKey; color: string } {
+// Open-Meteo's weather_code over-reports thunderstorms/rain at longer ranges
+// (it flags instability even at ~0% precip). Gate precipitation conditions on
+// the actual probability so we don't paint phantom storms. `pop` is 0..1.
+export function conditionIcon(code: number, pop: number): { key: IconKey; color: string } {
+  const storm = code >= 95;
+  const rain = (code >= 51 && code <= 67) || (code >= 80 && code <= 82);
+  const snow = (code >= 71 && code <= 77) || code === 85 || code === 86;
+
+  if (storm && pop >= 0.3) return { key: "storm", color: "#7c3aed" };
+  if ((storm || rain) && pop >= 0.2) return { key: "rain", color: "#2563eb" };
+  if (snow && pop >= 0.2) return { key: "snow", color: "#60a5fa" };
+  if (code === 45 || code === 48) return { key: "fog", color: "#94a3b8" };
   if (code === 0) return { key: "sun", color: "#f59e0b" };
   if (code === 1 || code === 2) return { key: "cloudSun", color: "#eab308" };
-  if (code === 3) return { key: "cloud", color: "#94a3b8" };
-  if (code === 45 || code === 48) return { key: "fog", color: "#94a3b8" };
-  if (code >= 51 && code <= 67) return { key: "rain", color: "#2563eb" };
-  if ((code >= 71 && code <= 77) || code === 85 || code === 86)
-    return { key: "snow", color: "#60a5fa" };
-  if (code >= 80 && code <= 82) return { key: "rain", color: "#2563eb" };
-  if (code >= 95) return { key: "storm", color: "#7c3aed" };
-  return { key: "cloud", color: "#94a3b8" };
+  return { key: "cloud", color: "#94a3b8" }; // overcast, or a precip code with low pop
 }

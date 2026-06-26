@@ -138,8 +138,8 @@ function townDayFor(key: string, points: ForecastPoint[], date: string): TownDay
 function summarize(start: TownDay, end: TownDay): DaySummary {
   let hi = -Infinity;
   let lo = Infinity;
-  let maxPop = 0;
-  let code = 0;
+  let maxPop = -1;
+  let code = 0; // weather code at the rainiest riding hour (the day's "headline")
   let seen = false;
   for (const town of [start, end]) {
     for (let h = RIDE_START_HOUR; h <= RIDE_END_HOUR; h++) {
@@ -148,11 +148,13 @@ function summarize(start: TownDay, end: TownDay): DaySummary {
       seen = true;
       hi = Math.max(hi, p.temp);
       lo = Math.min(lo, p.temp);
-      maxPop = Math.max(maxPop, p.pop);
-      code = Math.max(code, p.weatherCode); // higher WMO code ≈ more severe
+      if (p.pop >= maxPop) {
+        maxPop = p.pop;
+        code = p.weatherCode;
+      }
     }
   }
-  return seen ? { hi, lo, maxPop: Math.round(maxPop * 100), code } : null;
+  return seen ? { hi, lo, maxPop: Math.round(Math.max(0, maxPop) * 100), code } : null;
 }
 
 // ---- Build the full trip forecast ----------------------------------------

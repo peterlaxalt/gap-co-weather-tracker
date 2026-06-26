@@ -4,6 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "GAP / C&O Weather",
   description: "Hour-by-hour weather along the GAP & C&O Canal bike trip, Pittsburgh → DC.",
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {

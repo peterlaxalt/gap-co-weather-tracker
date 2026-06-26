@@ -15,11 +15,13 @@ import {
   Path,
   Mountains,
   CaretDown,
+  SunHorizon,
 } from "@phosphor-icons/react/dist/ssr";
 import type { TripForecast, TripDayForecast, TownDay, ForecastPoint } from "@/lib/weather";
 import {
   tempColorScale,
   popTint,
+  popDots,
   isWindy,
   windCompass,
   conditionIcon,
@@ -27,10 +29,13 @@ import {
 } from "@/lib/format";
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
-const HOUR_W = 50; // keep in sync with .cell / .hour width in globals.css
+const HOUR_W = 52; // keep in sync with .cell / .hour width in globals.css
 const FIRST_W = 92; // keep in sync with .town / .corner / .b-pill width
-const SCROLL_TO_HOUR = 6;
 const NOW_SPAN = 4; // hours each side of "now" that the blue band fades across
+
+// Rain indicator style — internal constant. "tint" = solid blue wash;
+// "dots" = dotted blue pattern (easier to spot, can be busier to read).
+const RAIN_STYLE: "tint" | "dots" = "tint";
 
 function hourLabel(h: number): string {
   const ampm = h < 12 ? "a" : "p";
@@ -38,14 +43,22 @@ function hourLabel(h: number): string {
   return `${hr}${ampm}`;
 }
 
+function clock(iso: string): string {
+  const h = Number(iso.slice(11, 13));
+  const m = iso.slice(14, 16);
+  const ampm = h < 12 ? "a" : "p";
+  const hr = h % 12 === 0 ? 12 : h % 12;
+  return `${hr}:${m}${ampm}`;
+}
+
 // Solid header background for the "now" band: blue, peaking at the current hour
-// and fading to plain white by ±NOW_SPAN hours. (Solid so the sticky header
-// stays opaque over scrolling content.)
+// and fading to plain white by ±NOW_SPAN hours (solid so the sticky header
+// stays opaque over scrolling content).
 function nowBandColor(h: number, now: number | null): string | undefined {
   if (now === null) return undefined;
   const d = Math.abs(h - now);
   if (d > NOW_SPAN) return undefined;
-  const a = 0.55 * (1 - d / NOW_SPAN);
+  const a = 0.5 * (1 - d / NOW_SPAN);
   const mix = (c: number) => Math.round(255 + (c - 255) * a);
   return `rgb(${mix(37)}, ${mix(99)}, ${mix(235)})`;
 }
@@ -66,15 +79,17 @@ export default function WeatherView({ forecast }: { forecast: TripForecast }) {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollLeft = SCROLL_TO_HOUR * HOUR_W;
-    const h = Number(
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/New_York",
-        hour: "2-digit",
-        hour12: false,
-      }).format(new Date()),
-    );
-    setNowHour(h % 24);
+    const h =
+      Number(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/New_York",
+          hour: "2-digit",
+          hour12: false,
+        }).format(new Date()),
+      ) % 24;
+    setNowHour(h);
+    // Autoscroll so the current hour sits near the left, with an hour of lead-in.
+    if (scrollRef.current) scrollRef.current.scrollLeft = Math.max(0, (h - 1) * HOUR_W);
   }, []);
 
   function toggle(day: number) {
@@ -98,7 +113,18 @@ export default function WeatherView({ forecast }: { forecast: TripForecast }) {
       <table className="grid" style={{ ["--hour-w" as string]: `${HOUR_W}px`, ["--first-w" as string]: `${FIRST_W}px` }}>
         <thead>
           <tr>
-            <th className="corner" />
+            <th className="corner">
+              {forecast.sun && (
+                <div className="sun">
+                  <span>
+                    <SunHorizon size={11} weight="fill" color="#f59e0b" /> {clock(forecast.sun.sunrise)}
+                  </span>
+                  <span className="sun-set">
+                    <SunHorizon size={11} weight="fill" color="#9aa6a0" /> {clock(forecast.sun.sunset)}
+                  </span>
+                </div>
+              )}
+            </th>
             {HOURS.map((h) => (
               <th
                 key={h}
@@ -237,29 +263,29 @@ function Cell({ p, mark, isNow }: { p: ForecastPoint | undefined; mark: boolean;
   const { bg, fg } = tempColorScale(p.temp);
   const pop = Math.round(p.pop * 100);
   const windy = isWindy(p.windSpeed);
+  const rainBg = RAIN_STYLE === "dots" ? popDots(p.pop) : { background: popTint(p.pop) };
   const title =
     `${p.temp}°F (feels ${p.feelsLike}°) · ${pop}% rain · ` +
     `wind ${p.windSpeed} mph from ${windCompass(p.windDeg)}${p.windGust ? ` (gust ${p.windGust})` : ""} · ` +
     `${p.humidity}% humidity`;
   return (
-    <td className={cls} style={{ background: popTint(p.pop) }} title={title}>
-      <Icon className="c-icon" size={15} weight="fill" color={color} />
+    <td className={cls} style={rainBg} title={title}>
+      <Icon className="c-icon" size={14} weight="fill" color={color} />
       <span className="temp" style={{ background: bg, color: fg }}>
         {p.temp}°
       </span>
       <span className={`rain ${pop >= 40 ? "rain-hi" : ""}`}>
-        <Drop size={9} weight="fill" /> {pop}%
+        <Drop size={10} weight="fill" /> {pop}%
       </span>
-      <span className={`wind ${windy ? "wind-hi" : ""}`}>
-        <NavigationArrow
-          size={9}
-          weight="fill"
-          style={{ transform: `rotate(${p.windDeg + 135}deg)` }}
-        />{" "}
-        {p.windSpeed}
-      </span>
-      <span className="hum">
-        <Waves size={9} weight="bold" /> {p.humidity}%
+      <span className="minor">
+        <span className={`wind ${windy ? "wind-hi" : ""}`}>
+          <NavigationArrow size={8} weight="fill" style={{ transform: `rotate(${p.windDeg + 135}deg)` }} />
+          {p.windSpeed}
+        </span>
+        <span className="hum">
+          <Waves size={8} weight="bold" />
+          {p.humidity}
+        </span>
       </span>
     </td>
   );

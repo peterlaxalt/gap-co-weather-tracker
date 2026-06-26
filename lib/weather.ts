@@ -62,6 +62,7 @@ export type TripDayForecast = {
 export type TripForecast = {
   generatedAt: number;
   tripDays: TripDayForecast[];
+  sun: { sunrise: string; sunset: string } | null; // local ISO, central NE-US point
   error: string | null;
 };
 
@@ -124,6 +125,22 @@ async function fetchCity(w: Waypoint): Promise<ForecastPoint[]> {
   });
 }
 
+// Approximate sunrise/sunset for the general trail region (mid-route point),
+// for "this time of year" context. Returns local ISO times for today.
+async function fetchSun(): Promise<{ sunrise: string; sunset: string } | null> {
+  try {
+    const url =
+      `${FORECAST_URL}?latitude=39.7&longitude=-78.2&daily=sunrise,sunset` +
+      `&timezone=${encodeURIComponent(TZ)}&forecast_days=1`;
+    const res = await fetch(url, { next: { revalidate: 1800 }, signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const d = (await res.json()) as { daily: { sunrise: string[]; sunset: string[] } };
+    return { sunrise: d.daily.sunrise[0], sunset: d.daily.sunset[0] };
+  } catch {
+    return null;
+  }
+}
+
 // ---- build a town-day from a town's full hourly series --------------------
 
 function townDayFor(key: string, points: ForecastPoint[], date: string): TownDay {
@@ -162,7 +179,10 @@ function summarize(start: TownDay, end: TownDay): DaySummary {
 export async function getTripForecast(): Promise<TripForecast> {
   const generatedAt = Math.floor(Date.now() / 1000);
   try {
-    const results = await Promise.all(WAYPOINTS.map((w) => fetchCity(w)));
+    const [results, sun] = await Promise.all([
+      Promise.all(WAYPOINTS.map((w) => fetchCity(w))),
+      fetchSun(),
+    ]);
     const series = new Map<string, ForecastPoint[]>();
     WAYPOINTS.forEach((w, i) => series.set(w.key, results[i]));
 
@@ -192,11 +212,12 @@ export async function getTripForecast(): Promise<TripForecast> {
       };
     });
 
-    return { generatedAt, tripDays, error: null };
+    return { generatedAt, tripDays, sun, error: null };
   } catch (err) {
     return {
       generatedAt,
       tripDays: [],
+      sun: null,
       error: err instanceof Error ? err.message : "fetch-failed",
     };
   }

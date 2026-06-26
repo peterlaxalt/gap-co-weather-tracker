@@ -1,4 +1,5 @@
 // Pure presentation helpers (safe to import in client components).
+import type { CSSProperties } from "react";
 
 // Temperature -> pill colors on a cold→hot gradient
 // (blue → cyan → green → yellow → orange → red). Returns bg + readable text.
@@ -19,6 +20,17 @@ export function popTint(pop: number): string {
   if (pop <= 0.05) return "transparent";
   const a = Math.min(0.42, 0.06 + pop * 0.4);
   return `rgba(37, 99, 235, ${a.toFixed(2)})`;
+}
+
+// Alternate rain indicator: a dotted blue pattern, denser/stronger with pop.
+// Returned as inline style props so it composes with the cell.
+export function popDots(pop: number): CSSProperties {
+  if (pop <= 0.05) return {};
+  const a = Math.min(0.7, 0.18 + pop * 0.55);
+  return {
+    backgroundImage: `radial-gradient(rgba(29, 78, 216, ${a.toFixed(2)}) 1.1px, transparent 1.6px)`,
+    backgroundSize: "7px 7px",
+  };
 }
 
 export function windCompass(deg: number): string {

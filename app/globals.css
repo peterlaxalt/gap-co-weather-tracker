@@ -6,7 +6,12 @@
   --line: #e7eae8;
   --line-strong: #d3dad6;
   --bg: #ffffff;
-  --banner-bg: #f4f7f5;
+  /* Day banner: a darker, friendly hue so it never blends into rain tint;
+     the D-pill is a deeper tint of the same color. */
+  --day-row: #565bb0;
+  --day-pill: #43478f;
+  --day-ink: #ffffff;
+  --day-line: #3d4185;
 }
 
 * {
@@ -55,16 +60,16 @@ body {
 .hour {
   width: var(--hour-w);
   min-width: var(--hour-w);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--faint);
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--muted);
   padding: 6px 0 5px;
   text-align: center;
+  border-left: 1px solid var(--line);
 }
 .hour-mark {
-  color: var(--muted);
-  font-weight: 700;
-  border-left: 1px solid var(--line);
+  color: var(--ink);
+  border-left: 1px solid var(--line-strong);
 }
 .hour.now {
   color: #0b2a66;
@@ -78,14 +83,33 @@ body {
   min-width: var(--first-w);
   background: var(--bg);
   box-shadow: 2px 0 5px -3px rgba(0, 0, 0, 0.18);
+  vertical-align: middle;
+}
+.sun {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 6px;
+}
+.sun span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #6b5a2e;
+  white-space: nowrap;
+}
+.sun .sun-set {
+  color: var(--muted);
 }
 
 /* ---- Day banner ---- */
 .banner-cell {
   padding: 0;
-  background: var(--banner-bg);
-  border-top: 1px solid var(--line-strong);
-  border-bottom: 1px solid var(--line);
+  background: var(--day-row);
+  border-top: 1px solid var(--day-line);
+  border-bottom: 1px solid var(--day-line);
   cursor: pointer;
   user-select: none;
 }
@@ -107,8 +131,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  background: var(--trail);
-  color: #fff;
+  background: var(--day-pill);
+  color: var(--day-ink);
 }
 .b-dnum {
   font-size: 14px;
@@ -116,6 +140,7 @@ body {
   letter-spacing: 0.01em;
 }
 .b-caret {
+  color: var(--day-ink);
   transition: transform 0.15s ease;
 }
 .b-caret.closed {
@@ -132,7 +157,7 @@ body {
 .b-date {
   font-size: 12px;
   font-weight: 800;
-  color: var(--ink);
+  color: #fff;
 }
 .b-stats {
   display: inline-flex;
@@ -140,18 +165,18 @@ body {
   gap: 3px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #33423b;
+  color: rgba(255, 255, 255, 0.85);
 }
 .b-stats svg {
   margin-left: 4px;
-  color: #5c6b63;
+  color: rgba(255, 255, 255, 0.6);
 }
 .b-wx {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 12.5px;
-  color: var(--ink);
+  color: #fff;
   margin-left: auto;
   padding-left: 8px;
 }
@@ -162,7 +187,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  color: #1d4ed8;
+  color: #dbe5ff;
   font-weight: 700;
 }
 
@@ -196,9 +221,9 @@ body {
 .t-range {
   display: block;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.2;
-  color: var(--ink);
+  color: var(--muted);
   margin-top: 2px;
 }
 .t-tag {
@@ -218,10 +243,11 @@ body {
   text-align: center;
   vertical-align: top;
   border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   line-height: 1.15;
 }
 .cell.mark {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--line-strong);
 }
 .cell.now {
   box-shadow: inset 1px 0 0 rgba(37, 99, 235, 0.5), inset -1px 0 0 rgba(37, 99, 235, 0.5);
@@ -238,38 +264,55 @@ body {
   border-radius: 7px;
   letter-spacing: -0.01em;
 }
-.rain,
-.wind,
-.hum {
+/* Rain — priority #2, kept clearly legible. */
+.rain {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  font-size: 9.5px;
-  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  color: #1b4ea8;
   margin-top: 2px;
   white-space: nowrap;
 }
-.rain svg,
-.hum svg {
-  color: #60a5fa;
+.rain svg {
+  color: #2563eb;
 }
 .rain-hi {
   color: #1d4ed8;
-  font-weight: 700;
 }
-.rain-hi svg {
-  color: #1d4ed8;
-}
-.wind svg {
+/* Wind + humidity — minor, on one compact line. */
+.minor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 9px;
   color: var(--faint);
+  white-space: nowrap;
 }
+.wind,
+.hum {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+.wind svg,
+.hum svg {
+  color: #bcc5bf;
+}
+/* Highlight a notable headwind. */
 .wind-hi {
-  color: #b45309;
-  font-weight: 700;
+  color: #92400e;
+  font-weight: 800;
+  background: #fde68a;
+  border-radius: 4px;
+  padding: 0 3px;
 }
 .wind-hi svg {
-  color: #b45309;
+  color: #92400e;
 }
 .dash {
   color: var(--line-strong);

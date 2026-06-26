@@ -192,7 +192,7 @@ function DayGroup({
                 rel="noreferrer"
                 onClick={(e) => e.stopPropagation()}
               >
-                <MapTrifold size={12} weight="bold" /> route
+                <MapTrifold size={12} weight="bold" /> Route
               </a>
               <DaySummaryChip d={d} />
             </div>

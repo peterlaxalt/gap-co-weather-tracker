@@ -16,6 +16,7 @@ import {
   Mountains,
   CaretDown,
   SunHorizon,
+  MapTrifold,
 } from "@phosphor-icons/react/dist/ssr";
 import type { TripForecast, TripDayForecast, TownDay, ForecastPoint } from "@/lib/weather";
 import {
@@ -184,6 +185,15 @@ function DayGroup({
                 <Bicycle size={12} weight="bold" /> {d.miles} mi
                 <Mountains size={11} weight="bold" /> {d.elevationFt.toLocaleString()} ft
               </span>
+              <a
+                className="b-route"
+                href={d.routeUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MapTrifold size={12} weight="bold" /> route
+              </a>
               <DaySummaryChip d={d} />
             </div>
           </div>

@@ -51,6 +51,7 @@ export type TripDayForecast = {
   weekday: string; // "Fri"
   pretty: string; // "Jun 26"
   routeLabel: string; // "Pittsburgh → Smithton"
+  routeUrl: string;
   miles: number;
   elevationFt: number;
   start: TownDay;
@@ -203,6 +204,7 @@ export async function getTripForecast(): Promise<TripForecast> {
         weekday: weekdayFmt.format(sample),
         pretty: prettyFmt.format(sample),
         routeLabel: `${start.name} → ${end.name}`,
+        routeUrl: d.routeUrl,
         miles: d.miles,
         elevationFt: d.elevationFt,
         start,

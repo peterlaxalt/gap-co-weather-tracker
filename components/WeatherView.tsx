@@ -12,7 +12,7 @@ import {
   Drop,
   Waves,
   NavigationArrow,
-  Path,
+  Bicycle,
   Mountains,
   CaretDown,
   SunHorizon,
@@ -171,15 +171,17 @@ function DayGroup({
         <td className="banner-cell" colSpan={HOURS.length + 1} onClick={onToggle} aria-expanded={open}>
           <div className="banner-inner">
             <span className="b-pill">
-              <span className="b-dnum">D{d.day}</span>
-              <CaretDown size={11} weight="bold" className={`b-caret ${open ? "" : "closed"}`} />
+              <CaretDown size={12} weight="bold" className={`b-caret ${open ? "" : "closed"}`} />
+              <span className="b-pill-text">
+                <span className="b-dnum">DAY {d.day}</span>
+                <span className="b-ddate">
+                  {d.weekday.toUpperCase()} {dateLabel}
+                </span>
+              </span>
             </span>
             <div className="b-body">
-              <span className="b-date">
-                {d.weekday} {dateLabel}
-              </span>
               <span className="b-stats">
-                <Path size={11} weight="bold" /> {d.miles} mi
+                <Bicycle size={12} weight="bold" /> {d.miles} mi
                 <Mountains size={11} weight="bold" /> {d.elevationFt.toLocaleString()} ft
               </span>
               <DaySummaryChip d={d} />
